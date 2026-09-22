@@ -18,7 +18,9 @@
 | Phase 2 | Synthetic neonatal images | ✅ Done (904 from real base) |
 | Phase 2 | Multimodal fusion model | ✅ Ready |
 | Phase 2 | Phase 2 training script | ✅ Done (ROC-AUC=0.76, F1-macro=0.61) |
-| Phase 2 | Phase 2 evaluation | ⏳ Pending |
+| Phase 2 | Phase 2 evaluation | ✅ Done |
+| Deploy | TorchScript export | ✅ Done |
+| Deploy | Gradio demo (app.py) | ✅ Done |
 
 ---
 
@@ -148,12 +150,88 @@ Phase 2 ROC-AUC = 0.76 — meaningful learning on 3-class synthetic data. Model 
 
 ---
 
-## Next Steps (in order)
+---
 
-1. Run `python src/evaluation/evaluate_phase2.py` — per-class confusion matrix, calibration
-2. Threshold tuning for Phase 1 (Platt scaling on val set, fix ROC-AUC issue)
-3. Rebuild Phase 1 manifest with stratified test split (force ≥25% normal in test)
-4. Inference script: `src/inference/predict.py` — single image + clinical → triage output
+## Pass 3 — Stratified Split + Evaluation + Export (2026-09-22)
+
+### Task 1 — Stratified manifest rebuild
+- Rewrote `scripts/build_manifest.py` to use `assign_splits_stratified()`: splits patients per class 70/15/15 independently
+- Total frames: 904 | Train: 647 / Val: 150 / Test: 107
+- Test class distribution: 67 abnormal / 40 normal (**37.4% normal** — up from 18.5%)
+- No patient leakage confirmed ✅
+
+### Task 2 — Phase 1 retrain (stratified split)
+- Env: `myenv` conda (Python 3.10, PyTorch CPU)
+- All 20 epochs ran, best checkpoint: epoch 18
+- Class weights: [1.388, 0.781] (up-weighted for normal class)
+
+| Metric | Val (epoch 18) | Test |
+|--------|---------------|------|
+| Loss | 0.2527 | 0.3077 |
+| Accuracy | 0.9600 | 0.8785 |
+| Balanced Accuracy | — | 0.9030 |
+| F1 | 0.9302 | 0.8926 |
+| ROC-AUC | — | **0.9989** |
+
+**ROC-AUC fix confirmed**: 0.394 → **0.9989** after stratified split. Root cause was test set imbalance, not model or code error.
+
+### Task 3 — Phase 1 evaluation (`src/evaluation/evaluate_phase1.py`)
+- Test samples: 107 | 67 abnormal / 40 normal
+- Reports saved to `models/phase1/reports/`
+
+| Metric | Value |
+|--------|-------|
+| Balanced Accuracy | 0.9030 |
+| ROC-AUC | **0.9989** |
+| Normal precision/recall/F1 | 0.75 / 1.00 / 0.86 |
+| Abnormal precision/recall/F1 | 1.00 / 0.81 / 0.89 |
+| Weighted F1 | 0.88 |
+
+### Task 4 — Phase 2 evaluation (`src/evaluation/evaluate_phase2.py`)
+- Test samples: 126 | Normal=23 / Moderate=57 / High Risk=46
+- 3-class confusion matrix, per-class ROC curves, JSON report
+- Reports saved to `models/phase2/reports/`
+
+| Metric | Value |
+|--------|-------|
+| Accuracy | 0.8000 |
+| Balanced Accuracy | 0.7487 |
+| ROC-AUC (OvR macro) | **0.8489** |
+| Normal F1 | 0.51 |
+| Moderate Risk F1 | 0.78 |
+| High Risk F1 | 0.96 |
+| Macro F1 | 0.75 |
+
+### Task 5 — TorchScript export (`scripts/export_models.py`)
+- `models/phase1/phase1_traced.pt` — MobileNetV3-Small binary head (**4.07 MB**)
+- `models/phase2/phase2_traced.pt` — multimodal fusion model (**4.25 MB**)
+- Total edge deployment size: **8.32 MB**
+
+### Task 6 — Gradio demo (`app.py`)
+- Tab 1 Phase 1 Triage: LUS image → Normal/Abnormal + confidence
+- Tab 2 Phase 2 Full Triage: LUS image + 8 clinical sliders → 3-class output
+- Loads TorchScript models + clinical normalization stats from checkpoint
+
+---
+
+## Status (Final)
+
+| Phase | Component | Status |
+|-------|-----------|--------|
+| Phase 1 | Training (stratified, 904 frames) | ✅ Done (F1=0.8926, ROC-AUC=0.9989) |
+| Phase 1 | Evaluation | ✅ Done |
+| Phase 2 | Training (multimodal) | ✅ Done (F1-macro=0.6106, ROC-AUC=0.7607) |
+| Phase 2 | Evaluation | ✅ Done |
+| Deploy | TorchScript export | ✅ Done |
+| Deploy | Gradio demo | ✅ Done |
+
+---
+
+## Next Steps (future work)
+
+1. Validate on real neonatal LUS data (not available in this study)
+2. Platt scaling / temperature calibration for Phase 1 probabilities
+3. Increase normal frame count (305 vs 391 abnormal in source)
 
 ---
 

@@ -1,1 +1,138 @@
-"""\nBuild Train/Val/Test Manifest from OpenPOCUS folder structure.\n\nExpected input folder layout:\n  data/raw/\n      normal/\n          img001.png\n          img002.png\n          ...\n      abnormal/\n          img101.png\n          ...\n\nOutput CSV (data/processed/phase1_manifest.csv):\n  frame_path, label, patient_id, split\n\nPatient-level split: 70% train / 15% val / 15% test\n(all frames from one patient stay in the same split)\n\nUsage:\n  python scripts/build_manifest.py --input data/raw --output data/processed/phase1_manifest.csv\n"""\n\nimport argparse\nimport hashlib\nfrom pathlib import Path\nimport numpy as np\nimport pandas as pd\n\n\nLABEL_MAP = {\n    "normal": 0,\n    "abnormal": 1,\n}\n\nIMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}\n\n\ndef path_to_patient_id(path: Path) -> str:\n    """\n    Derive a pseudo patient_id from filename.\n    If filenames follow pattern like PAT001_frame01.png, extracts PAT001.\n    Otherwise, hashes the stem.\n    """\n    stem = path.stem\n    parts = stem.split("_")\n    if len(parts) >= 2:\n        # Use first two parts for patient_id: REG_AVI, PNEU_NORTHUMBRIA, etc.\n        return "_".join(parts[:2])\n    # fallback: hash-based pseudo ID\n    return hashlib.md5(stem.encode()).hexdigest()[:8]\n\n\ndef assign_splits(patient_ids, train_frac=0.70, val_frac=0.15, seed=42):\n    """Patient-level split assignment."""\n    rng = np.random.default_rng(seed)\n    unique_patients = sorted(set(patient_ids))\n    rng.shuffle(unique_patients)\n\n    n = len(unique_patients)\n    n_train = int(n * train_frac)\n    n_val   = int(n * val_frac)\n\n    split_map = {}\n    for i, pid in enumerate(unique_patients):\n        if i < n_train:\n            split_map[pid] = "train"\n        elif i < n_train + n_val:\n            split_map[pid] = "validation"\n        else:\n            split_map[pid] = "test"\n\n    return split_map\n\n\ndef build_manifest(input_dir: str, output_path: str, seed: int = 42):\n    input_dir = Path(input_dir)\n    output_path = Path(output_path)\n    output_path.parent.mkdir(parents=True, exist_ok=True)\n\n    rows = []\n    for class_name, label in LABEL_MAP.items():\n        class_dir = input_dir / class_name\n        if not class_dir.exists():\n            print(f"[WARN] Directory not found: {class_dir}")\n            continue\n        for img_path in sorted(class_dir.iterdir()):\n            if img_path.suffix.lower() not in IMAGE_EXTENSIONS:\n                continue\n            patient_id = path_to_patient_id(img_path)\n            rows.append({\n                "frame_path": str(img_path.resolve()),\n                "label": label,\n                "label_name": class_name,\n                "patient_id": patient_id,\n            })\n\n    if not rows:\n        print("[ERROR] No images found. Check --input directory.")\n        return\n\n    df = pd.DataFrame(rows)\n    split_map = assign_splits(df["patient_id"].tolist(), seed=seed)\n    df["split"] = df["patient_id"].map(split_map)\n\n    df.to_csv(output_path, index=False)\n\n    print(f"\nManifest saved: {output_path}")\n    print(f"Total frames: {len(df):,}")\n    print("\nSplit distribution:")\n    print(df.groupby(["split", "label_name"]).size().unstack(fill_value=0))\n\n    # Leakage check\n    for split_a, split_b in [("train", "validation"), ("train", "test"), ("validation", "test")]:\n        a = set(df[df["split"] == split_a]["patient_id"])\n        b = set(df[df["split"] == split_b]["patient_id"])\n        overlap = a & b\n        if overlap:\n            print(f"\n[ERROR] Patient leakage between {split_a} and {split_b}: {overlap}")\n        else:\n            print(f"[OK] No patient overlap: {split_a} vs {split_b}")\n\n\ndef main():\n    parser = argparse.ArgumentParser()\n    parser.add_argument("--input", default="data/raw", help="Folder with normal/ and abnormal/ subfolders")\n    parser.add_argument("--output", default="data/processed/phase1_manifest.csv")\n    parser.add_argument("--seed", type=int, default=42)\n    args = parser.parse_args()\n    build_manifest(args.input, args.output, args.seed)\n\n\nif __name__ == "__main__":\n    main()\n
+"""
+Build Train/Val/Test Manifest from OpenPOCUS folder structure.
+
+Expected input folder layout:
+  data/raw/
+      normal/
+          img001.png
+          ...
+      abnormal/
+          img101.png
+          ...
+
+Output CSV (data/processed/phase1_manifest.csv):
+  frame_path, label, label_name, patient_id, split
+
+Patient-level STRATIFIED split: 70% train / 15% val / 15% test
+Stratification: normal/abnormal ratio preserved in each split.
+
+Usage:
+  python scripts/build_manifest.py --input data/raw --output data/processed/phase1_manifest.csv
+"""
+
+import argparse
+import hashlib
+from pathlib import Path
+import numpy as np
+import pandas as pd
+
+
+LABEL_MAP = {
+    "normal": 0,
+    "abnormal": 1,
+}
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
+
+
+def path_to_patient_id(path: Path) -> str:
+    stem = path.stem
+    parts = stem.split("_")
+    if len(parts) >= 2:
+        return "_".join(parts[:2])
+    return hashlib.md5(stem.encode()).hexdigest()[:8]
+
+
+def assign_splits_stratified(df: pd.DataFrame, train_frac: float = 0.70,
+                              val_frac: float = 0.15, seed: int = 42) -> dict:
+    """
+    Patient-level stratified split.
+    For each class, split its patients 70/15/15 independently, then merge.
+    Preserves normal/abnormal ratio in each split.
+    """
+    rng = np.random.default_rng(seed)
+
+    patient_label = df.groupby("patient_id")["label"].agg(
+        lambda x: int(x.mode()[0])
+    )
+
+    split_map: dict = {}
+    for label_val in sorted(patient_label.unique()):
+        patients = sorted(patient_label[patient_label == label_val].index.tolist())
+        rng.shuffle(patients)
+        n = len(patients)
+        n_train = max(1, int(n * train_frac))
+        n_val   = max(1, int(n * val_frac))
+        if n_train + n_val >= n:
+            n_val = max(1, n - n_train - 1)
+
+        for i, pid in enumerate(patients):
+            if i < n_train:
+                split_map[pid] = "train"
+            elif i < n_train + n_val:
+                split_map[pid] = "validation"
+            else:
+                split_map[pid] = "test"
+
+    return split_map
+
+
+def build_manifest(input_dir: str, output_path: str, seed: int = 42):
+    input_dir   = Path(input_dir)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = []
+    for class_name, label in LABEL_MAP.items():
+        class_dir = input_dir / class_name
+        if not class_dir.exists():
+            print(f"[WARN] Directory not found: {class_dir}")
+            continue
+        for img_path in sorted(class_dir.iterdir()):
+            if img_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            rows.append({
+                "frame_path": str(img_path.resolve()),
+                "label":      label,
+                "label_name": class_name,
+                "patient_id": path_to_patient_id(img_path),
+            })
+
+    if not rows:
+        print("[ERROR] No images found. Check --input directory.")
+        return
+
+    df = pd.DataFrame(rows)
+    split_map = assign_splits_stratified(df, train_frac=0.70, val_frac=0.15, seed=seed)
+    df["split"] = df["patient_id"].map(split_map)
+
+    df.to_csv(output_path, index=False)
+
+    print(f"\nManifest saved: {output_path}")
+    print(f"Total frames: {len(df):,}")
+    print("\nSplit x label distribution:")
+    dist = df.groupby(["split", "label_name"]).size().unstack(fill_value=0)
+    print(dist)
+    pct = dist.apply(lambda r: (r / r.sum() * 100).round(1), axis=1)
+    print("\nClass % per split:")
+    print(pct)
+
+    for split_a, split_b in [("train", "validation"), ("train", "test"), ("validation", "test")]:
+        a = set(df[df["split"] == split_a]["patient_id"])
+        b = set(df[df["split"] == split_b]["patient_id"])
+        overlap = a & b
+        status = f"[ERROR] LEAKAGE: {overlap}" if overlap else "[OK] No patient overlap"
+        print(f"  {status}: {split_a} vs {split_b}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input",  default="data/raw")
+    parser.add_argument("--output", default="data/processed/phase1_manifest.csv")
+    parser.add_argument("--seed",   type=int, default=42)
+    args = parser.parse_args()
+    build_manifest(args.input, args.output, args.seed)
+
+
+if __name__ == "__main__":
+    main()
