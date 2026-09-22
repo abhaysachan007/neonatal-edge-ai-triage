@@ -33,9 +33,7 @@
 ### Task 2 — Download OpenPOCUS data
 - **Status: ⚠️ PARTIAL**
 - Zenodo record 7842167 reached but only contains `Harri-1.pdf` — no image frames
-- Real image data must be downloaded manually
-- **Manual URL:** https://zenodo.org/records/7842167
-- **Action needed:** Place normal frames in `data/raw/normal/`, abnormal in `data/raw/abnormal/`
+- Real image data sourced from `jannisborn/covid19_ultrasound` instead (see Pass 2)
 
 ### Task 3 — Build manifest
 - **Status: ✅ DONE (mock data)**
@@ -161,11 +159,11 @@ Phase 2 ROC-AUC = 0.76 — meaningful learning on 3-class synthetic data. Model 
 
 ## Data Sources
 
-### OpenPOCUS
-- URL: https://zenodo.org/communities/openpocus
+### OpenPOCUS / covid19_ultrasound
+- URL: https://github.com/jannisborn/covid19_ultrasound
 - License: CC-BY 4.0
-- Content: Adult lung ultrasound frames, binary labeled (normal/abnormal)
-- Download size: ~2–5 GB depending on subset
+- Content: Adult lung ultrasound frames from convex/linear probes, COVID/Pneumonia/Normal/Viral labels
+- Frame extraction: `scripts/extract_openpocus_frames.py`
 
 ### Synthetic Neonatal Images
 - Source: OpenPOCUS adult frames processed through `src/data/neonatal_synthesizer.py`
