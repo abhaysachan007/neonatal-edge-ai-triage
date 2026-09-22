@@ -1,0 +1,51 @@
+phase: 2
+task: "multimodal_triage"
+description: "3-class neonatal triage — synthetic LUS + synthetic clinical data"
+
+data:
+  image_manifest_path: "data/processed/phase2_image_manifest.csv"
+  clinical_csv_path: "data/synthetic/clinical_data.csv"
+  image_size: 224
+  num_workers: 4
+
+model:
+  image_backbone: "mobilenet_v3_small"
+  pretrained: true
+  freeze_backbone: false
+  image_feature_dim: 576
+  clinical_input_dim: 8
+  clinical_hidden_dim: 32
+  fusion_dim: 128
+  num_classes: 3
+  dropout: 0.4
+
+training:
+  batch_size: 16
+  epochs: 30
+  learning_rate: 5.0e-5
+  weight_decay: 1.0e-4
+  optimizer: "adamw"
+  scheduler: "cosine"
+  early_stopping_patience: 7
+  random_seed: 42
+
+output:
+  checkpoint_dir: "models/phase2/checkpoints"
+  report_dir: "models/phase2/reports"
+  figure_dir: "models/phase2/figures"
+  history_dir: "models/phase2/history"
+
+classes:
+  0: "Normal"
+  1: "Moderate Risk"
+  2: "High Risk"
+
+clinical_features:
+  - "gestational_age_weeks"
+  - "birth_weight_kg"
+  - "spo2_percent"
+  - "fio2_fraction"
+  - "respiratory_rate"
+  - "chest_retractions"
+  - "grunting"
+  - "nasal_flaring"
