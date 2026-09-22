@@ -10,27 +10,80 @@
 |-------|-----------|--------|
 | Phase 1 | OpenPOCUS dataset loader | ✅ Ready |
 | Phase 1 | MobileNetV3-Small binary model | ✅ Ready |
-| Phase 1 | Training script | ✅ Ready |
-| Phase 1 | Manifest builder | ✅ Ready |
-| Phase 1 | Evaluation | ⏳ Pending (run after training) |
+| Phase 1 | Training script | ✅ Done (mock data, loop validated) |
+| Phase 1 | Manifest builder | ✅ Done |
+| Phase 1 | Evaluation | ⏳ Pending (needs real data) |
 | Phase 2 | Neonatal image synthesizer | ✅ Ready |
-| Phase 2 | Clinical data generator | ✅ Ready |
+| Phase 2 | Clinical data generator | ✅ Done (500 patients) |
+| Phase 2 | Synthetic neonatal images | ✅ Done (40 images from mock base) |
 | Phase 2 | Multimodal fusion model | ✅ Ready |
 | Phase 2 | Phase 2 training script | ⏳ Pending |
 | Phase 2 | Phase 2 evaluation | ⏳ Pending |
 
 ---
 
+## Run Log — 2026-09-22
+
+### Task 1 — Push missing scripts
+- **Status: ✅ DONE**
+- Created `scripts/download_openpocus.py` (was missing from scaffold)
+- Created `scripts/generate_mock_data.py` (pipeline validation fallback)
+- Both pushed to `abhaysachan007/neonatal-edge-ai-triage` main
+
+### Task 2 — Download OpenPOCUS data
+- **Status: ⚠️ PARTIAL**
+- Zenodo record 7842167 reached but only contains `Harri-1.pdf` — no image frames
+- Real image data must be downloaded manually
+- **Manual URL:** https://zenodo.org/records/7842167
+- **Action needed:** Place normal frames in `data/raw/normal/`, abnormal in `data/raw/abnormal/`
+
+### Task 3 — Build manifest
+- **Status: ✅ DONE (mock data)**
+- Generated 10 mock 224×224 PNG images per class via `generate_mock_data.py`
+- Manifest: `data/processed/phase1_manifest.csv` — 40 frames
+- Split: 32 train / 2 val / 6 test — patient-level, no leakage confirmed ✅
+
+### Task 4 — Train Phase 1
+- **Status: ✅ DONE (mock data — loop validated)**
+- Environment: `myenv` conda env (Python 3.10, PyTorch CPU)
+- MobileNetV3-Small pretrained weights: downloaded (9.83 MB)
+- Ran 13 epochs, early stopped (patience=5)
+- Best checkpoint: epoch 8 → `models/phase1/checkpoints/phase1_best.pth`
+- **Results on mock data (random noise images — metrics not meaningful):**
+  - Test Loss: 0.6929 | Accuracy: 0.5000 | F1: 0.6667 | ROC-AUC: 0.8889
+- **Training loop end-to-end: PASS ✅**
+
+### Task 5 — Generate synthetic clinical data
+- **Status: ✅ DONE**
+- `data/synthetic/clinical_data.csv` — 500 patients
+- Class: Normal=196, Moderate Risk=180, High Risk=124
+- Distributions from Sweet et al. 2023 + Isayama et al. 2016
+
+### Task 6 — Generate synthetic neonatal images
+- **Status: ✅ DONE (from mock base)**
+- `data/synthetic/neonatal_images/`: Normal=20, Moderate=15, High Risk=5, Total=40
+- Will re-run with real OpenPOCUS images once available
+
+---
+
+## Blocker: Real OpenPOCUS Image Data
+
+Pipeline validated end-to-end on mock data. To train meaningfully:
+1. Download frames from https://zenodo.org/records/7842167
+2. Place in `data/raw/normal/` and `data/raw/abnormal/`
+3. Re-run `build_manifest.py` → `train_phase1.py`
+
+---
+
 ## Next Steps (in order)
 
-1. Download OpenPOCUS data → place in `data/raw/normal/` and `data/raw/abnormal/`
-2. Run `python scripts/build_manifest.py`
-3. Run `python src/training/train_phase1.py --config config/phase1_config.yaml`
-4. Evaluate Phase 1
-5. Run `python scripts/generate_neonatal_images.py`
-6. Run `python scripts/generate_clinical_data.py`
-7. Build Phase 2 manifest
-8. Train Phase 2
+1. **[BLOCKED]** Obtain real OpenPOCUS image frames (manual download)
+2. Rebuild manifest with real data
+3. Re-train Phase 1 (expect meaningful metrics)
+4. Run `python src/evaluation/evaluate_phase1.py`
+5. Re-run `python scripts/generate_neonatal_images.py` with real base
+6. Build Phase 2 manifest
+7. Train Phase 2
 
 ---
 
